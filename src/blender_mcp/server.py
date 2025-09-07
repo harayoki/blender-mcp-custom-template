@@ -7,7 +7,7 @@ import logging
 import tempfile
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Dict, Any, List
+from typing import AsyncIterator, Dict, Any, List, Tuple
 import os
 from pathlib import Path
 import base64
@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("BlenderMCPServer")
+logger = logging.getLogger("BlenderMCPCustomServer")
 
 # Default configuration
 DEFAULT_HOST = "localhost"
@@ -172,7 +172,7 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
     
     try:
         # Just log that we're starting up
-        logger.info("BlenderMCP server starting up")
+        logger.info("BlenderMCPCustom server starting up")
         
         # Try to connect to Blender on startup to verify it's available
         try:
@@ -192,11 +192,11 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
             logger.info("Disconnecting from Blender on shutdown")
             _blender_connection.disconnect()
             _blender_connection = None
-        logger.info("BlenderMCP server shut down")
+        logger.info("BlenderMCPCustom server shut down")
 
 # Create the MCP server with lifespan support
 mcp = FastMCP(
-    "BlenderMCP",
+    "BlenderMCPCustom",
     lifespan=server_lifespan
 )
 
@@ -343,7 +343,7 @@ def get_polyhaven_categories(ctx: Context, asset_type: str = "hdris") -> str:
     try:
         blender = get_blender_connection()
         if not _polyhaven_enabled:
-            return "PolyHaven integration is disabled. Select it in the sidebar in BlenderMCP, then run it again."
+            return "PolyHaven integration is disabled. Select it in the sidebar in BlenderMCPCustom, then run it again."
         result = blender.send_command("get_polyhaven_categories", {"asset_type": asset_type})
         
         if "error" in result:
@@ -941,6 +941,47 @@ def asset_creation_strategy() -> str:
     - Hyper3D Rodin failed to generate the desired asset
     - The task specifically requires a basic material/color
     """
+
+@mcp.tool()
+def add_suchan(
+        ctx: Context,
+        name: str,
+        pos: Tuple[float, float, float],
+        size: float,
+        rot: Tuple[float, float, float],
+        color: Tuple[float, float, float]) -> str:
+    """
+    Add Suchan, child animal, to the current scene.
+    Suchan is a cute anime-style character.
+
+    Parameters:
+    - name: Name of the character object in Blender
+    - pos: (x, y, z) position to place Suchan
+    - size: Uniform scale factor to apply to Suchan
+    - rot: (x, y, z) rotation in degrees to apply to Suchan
+    - color: (r, g, b) color values between 0 and 1 to apply to Suchan's color
+    """
+    try:
+        blender = get_blender_connection()
+        result = blender.send_command("add_suchan", {
+            "name": name,
+            "position": pos,
+            "size": size,
+            "rotation": rot,
+            "color": color
+        })
+
+        if "error" in result:
+            return f"Error: {result['error']}"
+
+        if result.get("success"):
+            return "Successfully added Suchan to the scene!"
+        else:
+            return f"Failed to add Suchan: {result.get('message', 'Unknown error')}"
+    except Exception as e:
+        logger.error(f"Error adding Suchan: {str(e)}")
+        return f"Error adding Suchan: {str(e)}"
+
 
 # Main execution
 

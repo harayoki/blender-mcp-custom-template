@@ -207,6 +207,7 @@ class BlenderMCPServer:
             "get_polyhaven_status": self.get_polyhaven_status,
             "get_hyper3d_status": self.get_hyper3d_status,
             "get_sketchfab_status": self.get_sketchfab_status,
+            "add_suchan": self.add_suchan,
         }
 
         # Add Polyhaven handlers only if enabled
@@ -1687,6 +1688,39 @@ class BlenderMCPServer:
             import traceback
             traceback.print_exc()
             return {"error": f"Failed to download model: {str(e)}"}
+
+    def add_suchan(self,
+                   name: str,
+                   size=1.0,
+                   position=[0.0, 0.0, 0.0],
+                   rotation=[0.0, 0.0, 0.0],
+                   color=[1.0, 1.0, 1.0]):
+        """Add Suchan to the scene"""
+        try:
+            # add suzanne monkey
+            if name in bpy.data.objects:
+                # remove existing object
+                bpy.data.objects.remove(bpy.data.objects[name], do_unlink=True)
+
+            bpy.ops.mesh.primitive_monkey_add(size=size, location=position, rotation=rotation)
+            obj = bpy.context.active_object
+            obj.name = name
+            obj.data.name = name
+            # set color
+            obj.color = [*color, 1.0]
+
+            return {
+                "success": True,
+                "message": f"Suchan added successfully as {name}",
+                "object_name": obj.name,
+                "location": list(obj.location),
+                "rotation": list(obj.rotation_euler)
+            }
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {"error": f"Failed to add Suchan: {str(e)}"}
     #endregion
 
 # Blender UI Panel
