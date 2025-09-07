@@ -294,7 +294,7 @@ class BLENDERMCPCUSTOM_PT_Panel(bpy.types.Panel):
     bl_idname = "BLENDERMCPCUSTOM_PT_Panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'BlenderMCPCustom'
+    bl_category = 'BLMCPCustom'  # パネルのタブ名 長いと邪魔なので短くする
 
     def draw(self, context):
         layout = self.layout
