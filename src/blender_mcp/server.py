@@ -340,6 +340,7 @@ def list_layout_assets(ctx: Context) -> List[Dict[str, Any]]:
 def locate_objects_batched(ctx: Context, layout_data: List[Dict[str, Any]]) -> Dict[str, int]:
     """
     Locate multiple objects in the Blender scene by their names.
+    Note: Blender’s coordinate system is right-handed: Z is up, Y is depth (backward/forward), X is right. Distances are in meters.
     Parameters:
         ctx: Context
         layout_data: list of layout_data: Each item is a dictionary like:
@@ -354,7 +355,7 @@ def locate_objects_batched(ctx: Context, layout_data: List[Dict[str, Any]]) -> D
         To make data smaller, you can omit l, r, s, p if you want to use default values
         and values should be specified with fewer decimal places.
     }
-    Returns a dictionary, whitch has "num_located" and "num_errors" keys.
+    Returns a dictionary, which has "num_located" and "num_errors" keys.
     """
     try:
         blender = get_blender_connection()
@@ -367,9 +368,35 @@ def locate_objects_batched(ctx: Context, layout_data: List[Dict[str, Any]]) -> D
 
 @mcp.prompt()
 def layout_strategy() -> str:
-    """
-    Provide a strategy for planning a scene layout in Blender based on user requirements.
-    """
+    """Strategy for Planning a Scene Layout in Blender Based on User Requirements
+1.Check available assets with the list_layout_assets tool.
+This provides information about assets that can be copied and placed, including the asset’s name, type (object or instance), description, tags, collision data, and adjustable parameters.
+
+2.Analyze the user’s requirements.
+Identify the types of objects needed, their quantities, placement, rotation, scale, and adjustable parameters.
+If the user specifies tags directly, follow those.
+If not, select assets with appropriate tags based on their descriptions.
+Sometimes there may be no tags; in that case, use the description to choose suitable assets.
+The description may include detailed information about the asset’s appearance and intended use.
+If information is available on which axes can be rotated or scaled, follow it. If not, make reasonable assumptions.
+For adjustable parameters, descriptions may explain their purpose or valid ranges. If not, infer their meaning from the parameter names (e.g., shape variation, color, or depth relative to the ground).
+
+3.Place assets using the locate_objects_batched tool.
+This tool allows multiple objects to be placed efficiently at once.
+Blender’s coordinate system is right-handed: Z is up, Y is depth (backward/forward), X is right. Distances are in meters.
+The same asset may be reused multiple times in the layout (this is encouraged).
+Objects include collision information; by default, avoid overlaps, unless the user explicitly allows them.
+Unless otherwise specified, placement patterns should avoid a grid-like arrangement and instead appear natural rather than mechanical.
+Where appropriate and feasible, adjust size and rotation to achieve a more natural look.”
+Ground contact is not considered for now; assume Z=0 is the ground level.
+Object names should be based on the source asset’s name, adjusted to be unique in the scene.
+Specify placement, rotation, scale, and any adjustable parameters for each object.
+
+4.Summarize results for the user.
+After placement, present the return values from locate_objects_batched in clear, user-friendly language.
+
+# Do not attempt alternative processing with execute_blender_code if any tool execution fails, as this may compromise scene integrity.
+"""
     return """Strategy for Planning a Scene Layout in Blender Based on User Requirements
 
 1.Check available assets with the list_layout_assets tool.
@@ -401,7 +428,12 @@ After placement, present the return values from locate_objects_batched in clear,
 # Do not attempt alternative processing with execute_blender_code if any tool execution fails, as this may compromise scene integrity.
 """
 
+# geminiはメソッドの説明コメントを見ていた
+# もとのBlenderMCP実装ではreturnの文字列で説明していた
+# どちらが正しいかわからないので両方入れておく
+
 """
+（日本語版）
 ユーザからの要求に基づき、Blender内でシーンレイアウトを計画するための戦略を提供します。
 
 １．まずlist_layout_assetsツールを使用してコピーして配置可能なアセットを確認します。
