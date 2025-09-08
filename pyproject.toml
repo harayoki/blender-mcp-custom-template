@@ -1,7 +1,7 @@
 [project]
-name = "blender-mcp"
+name = "blender-mcp-custom-template"
 version = "1.2"
-description = "Blender integration through the Model Context Protocol"
+description = "Blender integration through the Model Context Protocol (Custom Sample)"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
@@ -28,5 +28,5 @@ build-backend = "setuptools.build_meta"
 package-dir = {"" = "src"}
 
 [project.urls]
-"Homepage" = "https://github.com/yourusername/blender-mcp"
-"Bug Tracker" = "https://github.com/yourusername/blender-mcp/issues"
+"Homepage" = "https://github.com/harayoki/blender-mcp-custom-template"
+"Bug Tracker" = "https://github.com/harayoki/blender-mcp-custom-template//issues"
