@@ -389,6 +389,8 @@ Objects include collision information; by default, avoid overlaps, unless the us
 Unless otherwise specified, placement patterns should avoid a grid-like arrangement and instead appear natural rather than mechanical.
 Where appropriate and feasible, adjust size and rotation to achieve a more natural look.”
 Ground contact is not considered for now; assume Z=0 is the ground level.
+If the user does not specify what the objects should be placed on or their height (Z position),
+place objects that would naturally be on the ground at height 0, and position others at an appropriate height.
 Object names should be based on the source asset’s name, adjusted to be unique in the scene.
 Specify placement, rotation, scale, and any adjustable parameters for each object.
 
@@ -419,6 +421,8 @@ Objects include collision information; by default, avoid overlaps, unless the us
 Unless otherwise specified, placement patterns should avoid a grid-like arrangement and instead appear natural rather than mechanical.
 Where appropriate and feasible, adjust size and rotation to achieve a more natural look.”
 Ground contact is not considered for now; assume Z=0 is the ground level.
+If the user does not specify what the objects should be placed on or their height (Z position), 
+place objects that would naturally be on the ground at height 0, and position others at an appropriate height.
 Object names should be based on the source asset’s name, adjusted to be unique in the scene.
 Specify placement, rotation, scale, and any adjustable parameters for each object.
 
@@ -456,6 +460,7 @@ Blenderの座標系は右手系で、Z軸が上方向、Y軸が奥方向、X軸�
 配置パターンは言及されない限りグリッド状の配置にならないよう機械的ではなく自然な感じにします。
 対象の設定的に自然で可能な範囲で大きさや回転も調整します。
 地面との接触は現状考えなくてよいです。Zが0の部分が接地面と考えます。
+何の上に配置するか、高さ（Z位置)はどうするかなどの言及がユーザーからない場合、地面にいそうなものは高さ０にそうでないものは適切な高さに配置してください。
 配置するオブジェクトの名前はコピー元オブジェクト名をベースに、シーンにユニークであるよう調整します。
 配置場所、回転、スケール、および調整可能なパラメータを指定します。
 
