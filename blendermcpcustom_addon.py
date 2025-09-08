@@ -10,7 +10,7 @@ import traceback
 from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty
 import io
 from contextlib import redirect_stdout, suppress
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
 import traceback
 
 bl_info = {
@@ -27,7 +27,7 @@ PI_DIV_180 = math.pi / 180.0
 DEFAULT_LAYOUT_SRC_COLLECTION_NAME = "LayoutSrcObjects"
 DEFAULT_LAYOUT_DST_COLLECTION_NAME = "LayoutDstObjects"
 LAYOUT_PROP_PREFIX: str = "layout_"
-
+LayoutMode = Literal["new", "edit", "del"]
 
 def iter_layout_idprop_keys(id_obj: bpy.types.ID, prefix: str = LAYOUT_PROP_PREFIX) -> List[str]:
     """
@@ -62,6 +62,9 @@ def draw_layout_idprops_section(layout: bpy.types.UILayout, id_obj: Optional[bpy
     col: bpy.types.UILayout = box.column(align=True)
     col.use_property_split = False        # ラベル列を無効化 → 入力欄を広く
     col.use_property_decorate = False     # 右端の装飾（歯車等）を非表示
+
+    # オブジェクト名表っ時
+    col.label(text=f"Object: {id_obj.name}", icon='OBJECT_DATA')
 
     for k in keys:
         # IDプロパティはブラケット記法で描画
@@ -237,6 +240,7 @@ class BlenderMCPCustomServer:
             "get_viewport_screenshot": self.get_viewport_screenshot,
             "execute_code": self.execute_code,
             "list_layout_assets": self.list_layout_assets,
+            "get_layout_data": self.get_layout_data,
             "locate_objects_batched": self.locate_objects_batched,
         }
 
@@ -385,42 +389,121 @@ class BlenderMCPCustomServer:
             objects.append(item)
         return {"assets": objects}
 
+    def get_layout_data(self, num_decimal_places:int = 3) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        シーン内の特定のコレクション内のオブジェクトの配置情報を取得する
+        レイアウトデータの内容はlocate_objects_batchedに準ずる
+
+        num_decimal_places: 位置、回転、スケールの小数点以下の桁数 通信量削減のため指定する
+        戻り値:　辞書
+        """
+        layout_data = []
+        dest_collection_name = bpy.context.scene.bmcpc_dst_collection
+        dest_collection = bpy.data.collections.get(dest_collection_name)
+        if not dest_collection:
+            return {"layout_data": layout_data}
+        for obj in dest_collection.objects:
+            item = {
+                "n": obj.name,  # name
+                "l": [obj.location.x, obj.location.y, obj.location.z],  # location
+                "r": [math.degrees(obj.rotation_euler.x),
+                      math.degrees(obj.rotation_euler.y),
+                      math.degrees(obj.rotation_euler.z)],  # rotation in degrees
+                "s": [obj.scale.x, obj.scale.y, obj.scale.z],  # scale
+                "p": {}  # params
+            }
+            for k, v in enumerate(item["l"]):
+                item["l"][k] = round(v, num_decimal_places)
+                # 小数点以下がなければ整数にする
+                if item["l"][k] == int(item["l"][k]):
+                    item["l"][k] = int(item["l"][k])
+            for k, v in enumerate(item["r"]):
+                item["r"][k] = round(v, num_decimal_places)
+                # 小数点以下がなければ整数にする
+                if item["r"][k] == int(item["r"][k]):
+                    item["r"][k] = int(item["r"][k])
+            for k, v in enumerate(item["s"]):
+                item["s"][k] = round(v, num_decimal_places)
+                # 小数点以下がなければ整数にする
+                if item["s"][k] == int(item["s"][k]):
+                    item["s"][k] = int(item["s"][k])
+
+            for k, v in obj.items():
+                if k.startswith(LAYOUT_PROP_PREFIX):
+                    param_key = k[len(LAYOUT_PROP_PREFIX):]
+                    item["p"][param_key] = v
+            # 通信料を減らすためdescとtagsは削除
+            if "desc" in item["p"]:
+                del item["p"]["desc"]
+            if "tags" in item["p"]:
+                del item["p"]["tags"]
+            # paramsが空なら削除
+            if len(item["p"].keys()) == 0:
+                del item["p"]
+            layout_data.append(item)
+        return {"layout_data": layout_data}
+
     def locate_objects_batched(self, layout_data: List[Dict[str, Any]]):
         """
         指定された名前のオブジェクトをコピーしてシーンに配置する
         layout_list: 配置するオブジェクトのリスト
         各要素は以下のキーを持つ辞書
-        - sn: オブジェクト名 (list_layout_assetsで得られたname)
-        - nn: 新しいオブジェクト名 (省略時はsnと同じものから自動で命名)
+        - m: 動作モード "new" / "edit" / "del" 省略時は "new"
+        - sn: オブジェクト名 (list_layout_assetsで得られたname) モ―ドが"new"の場合のみ必須
+        - n: 編集対象または新規のオブジェクト名 (省略時はnと同じものから自動で命名)
         - l: 位置 (x, y, z)
         - r: 回転 (x, y, z) in degrees
         - s: スケール (x, y, z)
         - p: その他のパラメータ (辞書)
         戻り値:
         以下を持つ辞書
+        - num_edited: 編集したオブジェクトの数
+        - num_deleted: 削除したオブジェクトの数
         - num_located: 配置に成功したオブジェクトの数
         - num_errors: エラーが発生したオブジェクトの数
         """
-        print(json.dumps(layout_data, indent=2, ensure_ascii=False))
         num_error = 0
         num_located = 0
+        num_edited = 0
+        num_deleted = 0
         dst_collection = bpy.data.collections.get(
             bpy.context.scene.bmcpc_dst_collection) or bpy.context.collection
         for layout in layout_data:
-            src_name = layout.get("sn")
-            if not src_name:
+            mode: LayoutMode = layout.get("m", "new")
+            if mode not in ("new", "edit", "del"):
                 num_error += 1
                 continue
-            obj = bpy.data.objects.get(src_name)
-            if not obj:
-                num_error += 1
+            if mode == "del":
+                # コレクションから削除
+                obj = bpy.data.objects.get(layout.get("n", ""))
+                if obj:
+                    for col in obj.users_collection:
+                        col.objects.unlink(obj)
+                    # データも削除
+                    bpy.data.objects.remove(obj)
+                    num_deleted += 1
+                else:
+                    num_error += 1
                 continue
-            new_name = layout.get("nn", src_name)
-            location = layout.get("l", [0, 0, 0])
-            rotation = layout.get("r", [0, 0, 0])
-            scale = layout.get("s", [1, 1, 1])
+            location = layout.get("l", None)
+            # メートルで指定されるので必要なら変換
+            if location:
+                location = [l * bpy.context.scene.unit_settings.scale_length for l in location]
+            rotation = layout.get("r", None)
+            scale = layout.get("s", None)
             params = layout.get("p", {})
-            try:
+            # "new" or "edit"
+            new_obj: Optional[bpy.types.Object] = None
+            if mode == "mew":
+                src_name = layout.get("n")
+                if not src_name:
+                    num_error += 1
+                    continue
+                obj = bpy.data.objects.get(src_name)
+                if not obj:
+                    num_error += 1
+                    continue
+                new_name = layout.get("nn", src_name)
                 if obj.type == 'MESH':
                     new_obj = duplicate_object_shared_mesh(obj, dst_collection)
                 elif obj.instance_type == 'COLLECTION' and obj.instance_collection:
@@ -432,22 +515,30 @@ class BlenderMCPCustomServer:
                     num_error += 1
                     continue
                 new_obj.name = new_name
-                # メートルで指定されるので必要なら変換
-                location = [l * bpy.context.scene.unit_settings.scale_length for l in location]
-                new_obj.location = location
-                new_obj.rotation_euler = [r * PI_DIV_180 for r in rotation]
-                new_obj.scale = scale
-                for k, v in params.items():
-                    prop_name = f"{LAYOUT_PROP_PREFIX}{k}"
-                    new_obj[prop_name] = v
-                num_located += 1
-            except Exception as e:
-                print(f"Error locating object {src_name}: {str(e)}")
-                print(traceback.format_exc())
+            elif mode == "edit":
+                new_obj = bpy.data.objects.get(layout.get("n", ""))
+            if not new_obj:
                 num_error += 1
+                continue
+            new_obj.rotation_mode = 'XYZ'
+            if location is not None:
+                new_obj.location = location
+            if rotation is not None:
+                new_obj.rotation_euler = [r * PI_DIV_180 for r in rotation]
+            if scale is not None:
+                new_obj.scale = scale
+            for k, v in params.items():
+                prop_name = f"{LAYOUT_PROP_PREFIX}{k}"
+                new_obj[prop_name] = v
+            if mode == "new":
+                num_located += 1
+            else:
+                num_edited += 1
 
         return {
             "results": {
+                "num_edited": num_edited,
+                "num_deleted": num_deleted,
                 "num_located": num_located,
                 "num_errors": num_error
             }

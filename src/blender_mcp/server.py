@@ -337,20 +337,51 @@ def list_layout_assets(ctx: Context) -> List[Dict[str, Any]]:
         raise Exception(f"Could not list layout assets: {str(e)}")
 
 @mcp.tool()
+def get_layout_data(ctx: Context, num_decimal_places:int = 3) -> Dict[str, Any]:
+    """
+    Get current layout data from the Blender scene.
+    Returns a dictionary with "objects" key, which is a list of object info dictionaries.
+    Each object info dictionary is like:
+    {
+        "n": "Object Name",
+        "l": [x, y, z],
+        "r": [roll, pitch, yaw],
+        "s": [sx, sy, sz],
+        "p": { ... }  # parameters used to tweak the object, as described in the asset info
+        # desc and tags are not included here( for reducing data size)
+
+        # Numbers without decimal places are sent as integers.
+
+    }
+    num_decimal_places: Number of decimal places to round location,
+        rotation, and scale values (default: 3) used for smaller data size.
+    """
+    try:
+        blender = get_blender_connection()
+        result = blender.send_command("get_layout_data", {"num_decimal_places": num_decimal_places})
+        return result.get("layout_data", [])
+    except Exception as e:
+        logger.error(f"Error getting layout data: {str(e)}")
+        raise Exception(f"Could not get layout data: {str(e)}")
+
+@mcp.tool()
 def locate_objects_batched(ctx: Context, layout_data: List[Dict[str, Any]]) -> Dict[str, int]:
     """
     Locate multiple objects in the Blender scene by their names.
+    if m(mode) is "layout", the object will be placed. if "edit", the object will be modified. if "del", the object will be deleted.
+    if delete mode, only "n" (name) is required.
     Note: Blender’s coordinate system is right-handed: Z is up, Y is depth (backward/forward), X is right. Distances are in meters.
     Parameters:
         ctx: Context
         layout_data: list of layout_data: Each item is a dictionary like:
     {
-        "sn":"Object Name"  # name of the src object to locate
-        "nn":"New Name"  # new name to assign should be unique
+        "sn":"Src Name"  # (optional) name of the src object to locate. "new" mode requires this.
+        "n":"Name"  # new name or edit / delete target name.
         "l": [x,y,z]  # (optional) location to place, default at (0,0,0)
         "r": [roll, pitch, yaw]  # (optional) rotations in degrees, default is (0,0,0)
         "s": [sx, sy, sz]  # (optional) scales, default is [1,1,1]
         "p": { ... }  # (optional) parameters to tweak the object, as described in the asset info
+        "m": mode # (optional) "new" or "del" or "edit" # default is "new"
         l and r and s and p are optional, if not provided, default values will be used.
         To make data smaller, you can omit l, r, s, p if you want to use default values
         and values should be specified with fewer decimal places.
@@ -436,9 +467,7 @@ After placement, present the return values from locate_objects_batched in clear,
 # もとのBlenderMCP実装ではreturnの文字列で説明していた
 # どちらが正しいかわからないので両方入れておく
 
-"""
-（日本語版）
-ユーザからの要求に基づき、Blender内でシーンレイアウトを計画するための戦略を提供します。
+"""ユーザからの要求に基づき、Blender内でシーンレイアウトを計画するための戦略を提供します。
 
 １．まずlist_layout_assetsツールを使用してコピーして配置可能なアセットを確認します。
 ここで得られる情報は、アセットの名前、タイプ（オブジェクトまたはインスタンス）、説明、タグ、衝突判定情報、および調整可能なパラメータです。
@@ -467,6 +496,106 @@ Blenderの座標系は右手系で、Z軸が上方向、Y軸が奥方向、X軸�
 ４．最後にlocate_objects_batchedツールの戻り値をユーザーに分かりやすい言葉で伝えます。
 
 ※ 各ツール実行で失敗してもexecute_blender_codeを使った代替処理は試みないでください。シーンの整合性が崩れるので。
+"""
+
+@mcp.prompt()
+def delete_strategy() -> str:
+    """Strategy for deleting objects in the scene:
+1. Check the current state of the scene.
+Use `get_layout_data` to obtain the current object layout. If you are certain about the objects to delete, such as those recently placed or edited, you may skip this step to save communication processing. Adjust based on user feedback.
+2. Identify the objects to delete.
+Analyze the user's requirements and determine the names of the objects to delete.
+3. Delete the objects.
+Use the `locate_objects_batched` tool to delete the target objects from the scene. The required properties are the object name and the "del" specification for `m` (mode).
+4. Summarize the results.
+Convey the results of the deletion operation to the user in clear and understandable language.
+"""
+    return """Strategy for deleting objects in the scene:
+1. Check the current state of the scene.
+Use `get_layout_data` to obtain the current object layout. If you are certain about the objects to delete, such as those recently placed or edited, you may skip this step to save communication processing. Adjust based on user feedback.
+2. Identify the objects to delete.
+Analyze the user's requirements and determine the names of the objects to delete.
+3. Delete the objects.
+Use the `locate_objects_batched` tool to delete the target objects from the scene. The required properties are the object name and the "del" specification for `m` (mode).
+4. Summarize the results.
+Convey the results of the deletion operation to the user in clear and understandable language.
+"""
+
+"""シーンのオブジェクト削除のための戦略
+1.現在のシーンの状況の確認
+get_layout_dataで現在のオブジェクトレイアウトを得ます。
+もし直前に配置・編集したなど確実に削除したいオブジェクトについてわかっているなら、
+通信処理を省くためにこのステップは省略しても構いません。ユーザの反応に合わせてください。
+2.削除対象オブジェクトの特定
+ユーザの要求を分析し、削除すべきオブジェクト名を特定します。
+3.オブジェクトの削除
+locate_objects_batchedツールを使用して、削除対象オブジェクトをシーンから削除します。
+この際必要となるプロパティはオブジェクト名とm(mode)の"del"指定のみです。
+4.結果の要約
+削除操作の結果をユーザに分かりやすい言葉で伝えます。
+"""
+
+@mcp.prompt()
+def edit_strategy() -> str:
+    """`Strategy for editing objects in the scene:
+1. Check the current state of the scene.
+Use `get_layout_data` to obtain the current object layout.
+If you are certain about the objects to edit, such as those recently placed or edited, you may skip this step to save communication processing. Adjust based on user feedback.
+2. Identify the objects to edit.
+Analyze the user's requirements and determine the names of the objects to edit.
+3. Edit the objects.
+Use the `locate_objects_batched` tool to edit the target objects in the scene.
+Specify "edit" for `m` (mode).
+Specify the properties to be changed, such as location, rotation, scale, and adjustable parameters.
+4. Summarize the results.
+Convey the results of the editing operation to the user in clear and understandable language.
+"""
+    return """`Strategy for editing objects in the scene:
+1. Check the current state of the scene.
+Use `get_layout_data` to obtain the current object layout.
+If you are certain about the objects to edit, such as those recently placed or edited, you may skip this step to save communication processing. Adjust based on user feedback.
+2. Identify the objects to edit.
+Analyze the user's requirements and determine the names of the objects to edit.
+3. Edit the objects.
+Use the `locate_objects_batched` tool to edit the target objects in the scene.
+Specify "edit" for `m` (mode).
+Specify the properties to be changed, such as location, rotation, scale, and adjustable parameters.
+4. Summarize the results.
+Convey the results of the editing operation to the user in clear and understandable language.
+"""
+
+"""シーンのオブジェクト編集のための戦略
+1.現在のシーンの状況の確認
+get_layout_dataで現在のオブジェクトレイアウトを得ます。
+もし直前に配置・編集したなど確実に削除したいオブジェクトについてわかっているなら、
+通信処理を省くためにこのステップは省略しても構いません。ユーザの反応に合わせてください。
+2.編集対象オブジェクトの特定
+ユーザの要求を分析し、編集すべきオブジェクト名を特定します。
+3.オブジェクトの編集
+locate_objects_batchedツールを使用して、編集対象オブジェクトをシーン内で編集します。
+m(mode)は"edit"を指定します。
+指定するプロパティは、位置、回転、スケール、および調整可能なパラメータのうち、変化があるものです。
+4.結果の要約
+編集操作の結果をユーザに分かりやすい言葉で伝えます。
+"""
+
+@mcp.prompt()
+def layout_and_edit_and_delete_strategy() -> str:
+    """Strategy for placing, editing, and deleting objects in the scene
+The previously mentioned layout_strategy, edit_strategy, and delete_strategy can be executed in any combination simultaneously.
+If you want to ensure the process proceeds step by step or confirm with the user at each stage, you can execute them separately.
+However, it is recommended to execute them all at once whenever possible.
+"""
+    return """Strategy for placing, editing, and deleting objects in the scene
+The previously mentioned layout_strategy, edit_strategy, and delete_strategy can be executed in any combination simultaneously.
+If you want to ensure the process proceeds step by step or confirm with the user at each stage, you can execute them separately.
+However, it is recommended to execute them all at once whenever possible.
+"""
+
+"""シーンのオブジェクト配置・編集・削除のための戦略
+これまで述べたlayout_strategy、edit_strategy、delete_strategyは同時にすきな組み合わせで実行できます。
+確実に処理を進めたい場合や、逐次ユーザに確認を入れたい場合はばらばらに実行しても構いませんが、
+可能な限り一度にまとめて実行することを推奨します。
 """
 
 
