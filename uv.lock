@@ -34,8 +34,17 @@ dependencies = [
     { name = "mcp", extra = ["cli"] },
 ]
 
+[package.optional-dependencies]
+dev = [
+    { name = "fake-bpy-module-4-3" },
+]
+
 [package.metadata]
-requires-dist = [{ name = "mcp", extras = ["cli"], specifier = ">=1.3.0" }]
+requires-dist = [
+    { name = "fake-bpy-module-4-3", marker = "extra == 'dev'" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.3.0" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "certifi"
@@ -74,6 +83,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/09/35/2495c4ac46b980e4ca1f6ad6db102322ef3ad2410b79fdde159a4b0f3b92/exceptiongroup-1.2.2.tar.gz", hash = "sha256:47c2edf7c6738fafb49fd34290706d1a1a2f4d1c6df275526b62cbb4aa5393cc", size = 28883 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/02/cc/b7e31358aac6ed1ef2bb790a9746ac2c69bcb3c8588b41616914eb106eaf/exceptiongroup-1.2.2-py3-none-any.whl", hash = "sha256:3111b9d131c238bec2f8f516e123e14ba243563fb135d3fe885990585aa7795b", size = 16453 },
+]
+
+[[package]]
+name = "fake-bpy-module-4-3"
+version = "20250130"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b3/a2/218e6b069500cc4c19c457f36af9d85bc20670e0583cc339e4fd05081658/fake_bpy_module_4_3-20250130.tar.gz", hash = "sha256:47aae269047351e9734ec1cc7fbb37d436bc8739d4aac21605b7ad99dcf0587b", size = 932451 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ea/52/d6934f234cd372b5c67e2c814115af723235afcc32ecda2804aec852ece5/fake_bpy_module_4.3-20250130-py3-none-any.whl", hash = "sha256:fd55093def85702bb324b67a86a43b705c8789c5965c3eaadc4d8cb48f9437ea", size = 1053556 },
 ]
 
 [[package]]

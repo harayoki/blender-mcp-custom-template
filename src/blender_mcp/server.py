@@ -9,11 +9,17 @@ from dataclasses import dataclass
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, List, Tuple
 import os
-
+from pathlib import Path
+from datetime import datetime
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, 
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+log_file = Path(__file__).parent.parent.parent / "logs" / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        # logging.StreamHandler(),  # コンソール出力
+                        logging.FileHandler(log_file.as_posix(), encoding='utf-8')  # ファイル出力
+                    ])
 logger = logging.getLogger("BlenderMCPCustomServer")
 
 # Default configuration
@@ -203,6 +209,7 @@ mcp = FastMCP(
 # Global connection for resources (since resources can't access context)
 _blender_connection = None
 
+
 def get_blender_connection():
     """Get or create a persistent Blender connection"""
     global _blender_connection
@@ -278,27 +285,152 @@ def get_viewport_screenshot(ctx: Context, max_size: int = 800) -> Image:
         logger.error(f"Error capturing screenshot: {str(e)}")
         raise Exception(f"Screenshot failed: {str(e)}")
 
+
+# @mcp.tool()
+# def execute_blender_code(ctx: Context, code: str) -> str:
+#     """
+#     Execute arbitrary Python code in Blender. Make sure to do it step-by-step by breaking it into smaller chunks.
+#
+#     Parameters:
+#     - code: The Python code to execute
+#     """
+#     try:
+#         # Get the global connection
+#         blender = get_blender_connection()
+#         result = blender.send_command("execute_code", {"code": code})
+#         return f"Code executed successfully: {result.get('result', '')}"
+#     except Exception as e:
+#         logger.error(f"Error executing code: {str(e)}")
+#         return f"Error executing code: {str(e)}"
+
+
 @mcp.tool()
-def execute_blender_code(ctx: Context, code: str) -> str:
+def list_layout_assets(ctx: Context) -> List[Dict[str, Any]]:
     """
-    Execute arbitrary Python code in Blender. Make sure to do it step-by-step by breaking it into smaller chunks.
-    
-    Parameters:
-    - code: The Python code to execute
+    List available layout assets from the Blender addon.
+    Returns a list of asset info object.
+    Represents information about objects or instances that can be copied and placed.
+    Asset info object is dictionary like:
+    {
+        "name": "Asset Name",
+        "type": "Asset Type",  # "obj" or "instance"
+        "desc": "Description of the asset",
+        "tags": ["tag1", "tag2"],  # list of tags
+        "collider": {
+            "type": "sphere",  # currently only "sphere" is supported
+            "radius": 1.0  # radius in meters
+        },
+        # additional properties used for tweaking the asset
+        "params": {
+            # How to use these properties should be described in the asset description
+            "prop1": "value1",
+            "prop2": "value2"
+        }
+    }
     """
     try:
-        # Get the global connection
         blender = get_blender_connection()
-        result = blender.send_command("execute_code", {"code": code})
-        return f"Code executed successfully: {result.get('result', '')}"
+        result = blender.send_command("list_layout_assets", {})
+        return result.get("assets", [])
     except Exception as e:
-        logger.error(f"Error executing code: {str(e)}")
-        return f"Error executing code: {str(e)}"
+        logger.error(f"Error listing layout assets: {str(e)}")
+        raise Exception(f"Could not list layout assets: {str(e)}")
 
+@mcp.tool()
+def locate_objects_batched(ctx: Context, layout_data: List[Dict[str, Any]]) -> Dict[str, int]:
+    """
+    Locate multiple objects in the Blender scene by their names.
+    Parameters:
+        ctx: Context
+        layout_data: list of layout_data: Each item is a dictionary like:
+    {
+        "sn":"Object Name"  # name of the src object to locate
+        "nn":"New Name"  # new name to assign should be unique
+        "l": [x,y,z]  # (optional) location to place, default at (0,0,0)
+        "r": [roll, pitch, yaw]  # (optional) rotations in degrees, default is (0,0,0)
+        "s": [sx, sy, sz]  # (optional) scales, default is [1,1,1]
+        "p": { ... }  # (optional) parameters to tweak the object, as described in the asset info
+        l and r and s and p are optional, if not provided, default values will be used.
+        To make data smaller, you can omit l, r, s, p if you want to use default values
+        and values should be specified with fewer decimal places.
+    }
+    Returns a dictionary, whitch has "num_located" and "num_errors" keys.
+    """
+    try:
+        blender = get_blender_connection()
+        result = blender.send_command(
+            "locate_objects_batched", {"layout_data": layout_data})
+        return result.get("locations", {})
+    except Exception as e:
+        logger.error(f"Error locating objects: {str(e)}")
+        raise Exception(f"Could not locate objects: {str(e)}")
 
-# @mcp.prompt()
-# def sample_strategy() -> str:
-#     return ""
+@mcp.prompt()
+def layout_strategy() -> str:
+    """
+    Provide a strategy for planning a scene layout in Blender based on user requirements.
+    """
+    return """Strategy for Planning a Scene Layout in Blender Based on User Requirements
+
+1.Check available assets with the list_layout_assets tool.
+This provides information about assets that can be copied and placed, including the asset’s name, type (object or instance), description, tags, collision data, and adjustable parameters.
+
+2.Analyze the user’s requirements.
+Identify the types of objects needed, their quantities, placement, rotation, scale, and adjustable parameters.
+If the user specifies tags directly, follow those.
+If not, select assets with appropriate tags based on their descriptions.
+Sometimes there may be no tags; in that case, use the description to choose suitable assets.
+The description may include detailed information about the asset’s appearance and intended use.
+If information is available on which axes can be rotated or scaled, follow it. If not, make reasonable assumptions.
+For adjustable parameters, descriptions may explain their purpose or valid ranges. If not, infer their meaning from the parameter names (e.g., shape variation, color, or depth relative to the ground).
+
+3.Place assets using the locate_objects_batched tool.
+This tool allows multiple objects to be placed efficiently at once.
+Blender’s coordinate system is right-handed: Z is up, Y is depth (backward/forward), X is right. Distances are in meters.
+The same asset may be reused multiple times in the layout (this is encouraged).
+Objects include collision information; by default, avoid overlaps, unless the user explicitly allows them.
+Unless otherwise specified, placement patterns should avoid a grid-like arrangement and instead appear natural rather than mechanical.
+Where appropriate and feasible, adjust size and rotation to achieve a more natural look.”
+Ground contact is not considered for now; assume Z=0 is the ground level.
+Object names should be based on the source asset’s name, adjusted to be unique in the scene.
+Specify placement, rotation, scale, and any adjustable parameters for each object.
+
+4.Summarize results for the user.
+After placement, present the return values from locate_objects_batched in clear, user-friendly language.
+
+# Do not attempt alternative processing with execute_blender_code if any tool execution fails, as this may compromise scene integrity.
+"""
+
+"""
+ユーザからの要求に基づき、Blender内でシーンレイアウトを計画するための戦略を提供します。
+
+１．まずlist_layout_assetsツールを使用してコピーして配置可能なアセットを確認します。
+ここで得られる情報は、アセットの名前、タイプ（オブジェクトまたはインスタンス）、説明、タグ、衝突判定情報、および調整可能なパラメータです。
+
+２．次に、ユーザの要求を分析し、必要なオブジェクトの種類、数量、配置場所、回転、スケール、および調整可能なパラメータを特定します。
+ユーザーからはタグの直接指示があればそれに従い、そうでなければアセットの説明をもとに適切なタグがあるものを選びます。
+タグは設定がないこともありますが.その場合も説明をもとに適切なアセットを選びます。
+説明にはそのオブジェクトの詳細な見た目や使い道の情報も含まれます。
+どの軸に回転していいか、スケールを変えていいかの情報があれば従います。指示がなければ推測します。
+調整可能なパラメータがある場合、説明にその使い方や設定できる値の範囲が書かれているはずですが、説明がなければパラメータ名から推測します。
+見た目の形状の変化や、色の変更、(見た目の）地面への埋まり具合などが想定されています。
+
+３．次にlocate_objects_batchedツールを使用してアセットを配置します。
+このツールは一度に複数のオブジェクトを配置できるため、効率的です。
+Blenderの座標系は右手系で、Z軸が上方向、Y軸が奥方向、X軸が右方向です。長さはメートル単位で考えます。
+レイアウトには必要に応じて同じオブジェクトを複数回使用しても構いません（むしろ推奨されます）。
+オブジェクトには衝突判定情報が含まれており、これを考慮して基本はオブジェクト同士が重ならないように配置しますが、
+ユーザの指示によっては重なりが許可されます。
+配置パターンは言及されない限りグリッド状の配置にならないよう機械的ではなく自然な感じにします。
+対象の設定的に自然で可能な範囲で大きさや回転も調整します。
+地面との接触は現状考えなくてよいです。Zが0の部分が接地面と考えます。
+配置するオブジェクトの名前はコピー元オブジェクト名をベースに、シーンにユニークであるよう調整します。
+配置場所、回転、スケール、および調整可能なパラメータを指定します。
+
+４．最後にlocate_objects_batchedツールの戻り値をユーザーに分かりやすい言葉で伝えます。
+
+※ 各ツール実行で失敗してもexecute_blender_codeを使った代替処理は試みないでください。シーンの整合性が崩れるので。
+"""
 
 
 def main():
