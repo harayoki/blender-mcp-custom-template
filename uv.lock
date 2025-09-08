@@ -27,7 +27,7 @@ wheels = [
 ]
 
 [[package]]
-name = "blender-mcp"
+name = "blender-mcp-custom-template"
 version = "1.2"
 source = { editable = "." }
 dependencies = [

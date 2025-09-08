@@ -26,6 +26,47 @@ bl_info = {
 PI_DIV_180 = math.pi / 180.0
 DEFAULT_LAYOUT_SRC_COLLECTION_NAME = "LayoutSrcObjects"
 DEFAULT_LAYOUT_DST_COLLECTION_NAME = "LayoutDstObjects"
+LAYOUT_PROP_PREFIX: str = "layout_"
+
+
+def iter_layout_idprop_keys(id_obj: bpy.types.ID, prefix: str = LAYOUT_PROP_PREFIX) -> List[str]:
+    """
+    IDブロック（Objectなど）から、prefixで始まる「文字列型」のIDプロパティのキーを列挙して返す。
+    """
+    # id_obj.keys() は「IDプロパティ」だけが列挙される（ビルトイン属性は含まれない）
+    keys: List[str] = [
+        k for k in id_obj.keys()
+        if k.startswith(prefix) and isinstance(id_obj.get(k), str)
+    ]
+    keys.sort()
+    return keys
+
+
+def draw_layout_idprops_section(layout: bpy.types.UILayout, id_obj: Optional[bpy.types.ID], *,
+                                title: str = "Layout Properties") -> None:
+    """
+    Nパネル等の draw() で呼び出す補助。該当のIDプロパティがあれば「入力欄の塊」を描画する。
+    無ければ何も描かない（= そのセクションは出ない）。
+    """
+    if id_obj is None:
+        return
+
+    keys: List[str] = iter_layout_idprop_keys(id_obj)
+    if not keys:
+        return
+
+    box: bpy.types.UILayout = layout.box()
+    header = box.row(align=True)
+    header.label(text=title, icon='ALIGN_LEFT')
+
+    col: bpy.types.UILayout = box.column(align=True)
+    col.use_property_split = False        # ラベル列を無効化 → 入力欄を広く
+    col.use_property_decorate = False     # 右端の装飾（歯車等）を非表示
+
+    for k in keys:
+        # IDプロパティはブラケット記法で描画
+        col.label(text=k[len(LAYOUT_PROP_PREFIX):])  # ラベルをプロパティ名に
+        col.prop(id_obj, f'["{k}"]', text="")  # ラベルを消して全幅入力に
 
 
 class BlenderMCPCustomServer:
@@ -331,12 +372,12 @@ class BlenderMCPCustomServer:
             else:
                 continue
             for k , v in obj.items():
-                if k == "layout_desc":
+                if k == LAYOUT_PROP_PREFIX + "desc":
                     item["desc"] = v
-                if k == "layout_tags":
+                if k == LAYOUT_PROP_PREFIX + "tags":
                     item["tags"] = v.split(",") if isinstance(v, str) else []
-                elif k.startswith("layout_"):
-                    param_key = k[len("layout_"):]
+                elif k.startswith(LAYOUT_PROP_PREFIX):
+                    param_key = k[len(LAYOUT_PROP_PREFIX):]
                     item["params"][param_key] = v
             radius = max(obj.dimensions) / 2.0
             radius = radius / bpy.context.scene.unit_settings.scale_length  # メートル単位に変換
@@ -397,7 +438,7 @@ class BlenderMCPCustomServer:
                 new_obj.rotation_euler = [r * PI_DIV_180 for r in rotation]
                 new_obj.scale = scale
                 for k, v in params.items():
-                    prop_name = f"layout_{k}"
+                    prop_name = f"{LAYOUT_PROP_PREFIX}{k}"
                     new_obj[prop_name] = v
                 num_located += 1
             except Exception as e:
@@ -464,6 +505,9 @@ class BLENDERMCPCUSTOM_PT_Panel(bpy.types.Panel):
 
         layout.operator("blendermcpcustom.add_layout_custom_props",
                         text="Add custom props to selected")
+
+        obj: Optional[bpy.types.Object] = context.active_object
+        draw_layout_idprops_section(layout, obj, title="Layout Properties")
 
 
 # Operator to start the server
