@@ -404,7 +404,7 @@ def locate_objects_batched(ctx: Context, layout_data: List[Dict[str, Any]]) -> D
         blender = get_blender_connection()
         result = blender.send_command(
             "locate_objects_batched", {"layout_data": layout_data})
-        return result.get("locations", {})
+        return result.get("results", {})
     except Exception as e:
         logger.error(f"Error locating objects: {str(e)}")
         raise Exception(f"Could not locate objects: {str(e)}")

@@ -455,9 +455,9 @@ class BlenderMCPCustomServer:
                     else:
                         item["p"][param_key] = v
             if "d" in item and "d" not in target:
-                del item["desc"]
+                del item["d"]
             if "t" in item and "t" not in target:
-                del item["tags"]
+                del item["t"]
 
             # targetに含まれないキーは削除
             for key in list(item.keys()):
@@ -494,12 +494,14 @@ class BlenderMCPCustomServer:
         num_located = 0
         num_edited = 0
         num_deleted = 0
+        error_messages = []
         dst_collection = bpy.data.collections.get(
             bpy.context.scene.bmcpc_dst_collection) or bpy.context.collection
         for layout in layout_data:
             mode: LayoutMode = layout.get("m", "new")
             if mode not in ("new", "edit", "del"):
                 num_error += 1
+                error_messages.append(f"Invalid mode: {mode}")
                 continue
             if mode == "del":
                 # コレクションから削除
@@ -511,6 +513,7 @@ class BlenderMCPCustomServer:
                     bpy.data.objects.remove(obj)
                     num_deleted += 1
                 else:
+                    error_messages.append(f"Obj not found: {layout.get('n', '')}")
                     num_error += 1
                 continue
             location = layout.get("l", None)
@@ -522,26 +525,30 @@ class BlenderMCPCustomServer:
             params = layout.get("p", {})
             # "new" or "edit"
             new_obj: Optional[bpy.types.Object] = None
-            if mode == "mew":
-                src_name = layout.get("n")
+            if mode == "new":
+                src_name = layout.get("sn")
                 if not src_name:
+                    error_messages.append("No src name")
                     num_error += 1
                     continue
                 obj = bpy.data.objects.get(src_name)
                 if not obj:
+                    error_messages.append(f"Src obj not found: {src_name}")
                     num_error += 1
                     continue
-                new_name = layout.get("nn", src_name)
+                new_name = layout.get("n", src_name)
                 if obj.type == 'MESH':
                     new_obj = duplicate_object_shared_mesh(obj, new_name, dst_collection)
                 elif obj.instance_type == 'COLLECTION' and obj.instance_collection:
                     new_obj = duplicate_instance_object(obj, new_name, dst_collection)
                 else:
+                    error_messages.append(f"Unsupported obj type for dup: {obj.type}")
                     num_error += 1
                     continue
             elif mode == "edit":
                 new_obj = bpy.data.objects.get(layout.get("n", ""))
             if not new_obj:
+                error_messages.append(f"Obj not found: {layout.get('n', '')}")
                 num_error += 1
                 continue
             if location is not None:
@@ -557,15 +564,17 @@ class BlenderMCPCustomServer:
                 num_located += 1
             else:
                 num_edited += 1
-
-        return {
-            "results": {
+        result_obj = {
                 "num_edited": num_edited,
                 "num_deleted": num_deleted,
                 "num_located": num_located,
-                "num_errors": num_error
+                "num_errors": num_error,
             }
-        }
+        if error_messages:
+            error_messages = list(set(error_messages))
+            result_obj["err"] = error_messages
+        print(json.dumps(result_obj, indent=2, ensure_ascii=False))
+        return {"results": result_obj}
 
 
 def duplicate_object_shared_mesh(
