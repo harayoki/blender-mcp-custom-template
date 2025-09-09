@@ -337,7 +337,7 @@ def list_layout_assets(ctx: Context) -> List[Dict[str, Any]]:
         raise Exception(f"Could not list layout assets: {str(e)}")
 
 @mcp.tool()
-def get_layout_data(ctx: Context, num_decimal_places:int = 3) -> Dict[str, Any]:
+def get_layout_data(ctx: Context, num_decimal_places:int = 3, target: str = "nl") -> Dict[str, Any]:
     """
     Get current layout data from the Blender scene.
     Returns a dictionary with "objects" key, which is a list of object info dictionaries.
@@ -347,6 +347,8 @@ def get_layout_data(ctx: Context, num_decimal_places:int = 3) -> Dict[str, Any]:
         "l": [x, y, z],
         "r": [roll, pitch, yaw],
         "s": [sx, sy, sz],
+        "d": "Asset Description",
+        "t": ["tag1", "tag2"],  # list of tags
         "p": { ... }  # parameters used to tweak the object, as described in the asset info
         # desc and tags are not included here( for reducing data size)
 
@@ -355,10 +357,20 @@ def get_layout_data(ctx: Context, num_decimal_places:int = 3) -> Dict[str, Any]:
     }
     num_decimal_places: Number of decimal places to round location,
         rotation, and scale values (default: 3) used for smaller data size.
+    target: A string specifying which properties to include:
+        "n": name
+        "l": location
+        "r": rotation
+        "s": scale
+        "d": description
+        "t": tags
+        "p": parameters
+        Default is "nl" (name and location).
     """
     try:
         blender = get_blender_connection()
-        result = blender.send_command("get_layout_data", {"num_decimal_places": num_decimal_places})
+        result = blender.send_command(
+            "get_layout_data", {"num_decimal_places": num_decimal_places, "target": target})
         return result.get("layout_data", [])
     except Exception as e:
         logger.error(f"Error getting layout data: {str(e)}")
@@ -502,7 +514,10 @@ Blenderの座標系は右手系で、Z軸が上方向、Y軸が奥方向、X軸�
 def delete_strategy() -> str:
     """Strategy for deleting objects in the scene:
 1. Check the current state of the scene.
-Use `get_layout_data` to obtain the current object layout. If you are certain about the objects to delete, such as those recently placed or edited, you may skip this step to save communication processing. Adjust based on user feedback.
+Use `get_layout_data` to obtain the current object layout.
+Follow the method described in get_layout_data_strategy.
+If you are certain about the objects to delete, such as those recently placed or edited, you may skip this step to save communication processing. Adjust based on user feedback.
+You can also limit the data to be retrieved with the `target` parameter and adjust it as needed. Less data reduces communication load.
 2. Identify the objects to delete.
 Analyze the user's requirements and determine the names of the objects to delete.
 3. Delete the objects.
@@ -512,7 +527,10 @@ Convey the results of the deletion operation to the user in clear and understand
 """
     return """Strategy for deleting objects in the scene:
 1. Check the current state of the scene.
-Use `get_layout_data` to obtain the current object layout. If you are certain about the objects to delete, such as those recently placed or edited, you may skip this step to save communication processing. Adjust based on user feedback.
+Use `get_layout_data` to obtain the current object layout. 
+Follow the method described in get_layout_data_strategy.
+If you are certain about the objects to delete, such as those recently placed or edited, you may skip this step to save communication processing. Adjust based on user feedback.
+You can also limit the data to be retrieved with the `target` parameter and adjust it as needed. Less data reduces communication load.
 2. Identify the objects to delete.
 Analyze the user's requirements and determine the names of the objects to delete.
 3. Delete the objects.
@@ -524,8 +542,10 @@ Convey the results of the deletion operation to the user in clear and understand
 """シーンのオブジェクト削除のための戦略
 1.現在のシーンの状況の確認
 get_layout_dataで現在のオブジェクトレイアウトを得ます。
+やり方はget_layout_data_strategyに準じてください。
 もし直前に配置・編集したなど確実に削除したいオブジェクトについてわかっているなら、
 通信処理を省くためにこのステップは省略しても構いません。ユーザの反応に合わせてください。
+取得するデータもtargetで限定できるので、必要に応じて調整してください。少ないほうが通信量が減ります。
 2.削除対象オブジェクトの特定
 ユーザの要求を分析し、削除すべきオブジェクト名を特定します。
 3.オブジェクトの削除
@@ -540,6 +560,7 @@ def edit_strategy() -> str:
     """`Strategy for editing objects in the scene:
 1. Check the current state of the scene.
 Use `get_layout_data` to obtain the current object layout.
+Follow the method described in get_layout_data_strategy.
 If you are certain about the objects to edit, such as those recently placed or edited, you may skip this step to save communication processing. Adjust based on user feedback.
 2. Identify the objects to edit.
 Analyze the user's requirements and determine the names of the objects to edit.
@@ -553,6 +574,7 @@ Convey the results of the editing operation to the user in clear and understanda
     return """`Strategy for editing objects in the scene:
 1. Check the current state of the scene.
 Use `get_layout_data` to obtain the current object layout.
+Follow the method described in get_layout_data_strategy.
 If you are certain about the objects to edit, such as those recently placed or edited, you may skip this step to save communication processing. Adjust based on user feedback.
 2. Identify the objects to edit.
 Analyze the user's requirements and determine the names of the objects to edit.
@@ -567,6 +589,7 @@ Convey the results of the editing operation to the user in clear and understanda
 """シーンのオブジェクト編集のための戦略
 1.現在のシーンの状況の確認
 get_layout_dataで現在のオブジェクトレイアウトを得ます。
+やり方はget_layout_data_strategyに準じてください。
 もし直前に配置・編集したなど確実に削除したいオブジェクトについてわかっているなら、
 通信処理を省くためにこのステップは省略しても構いません。ユーザの反応に合わせてください。
 2.編集対象オブジェクトの特定
@@ -598,6 +621,60 @@ However, it is recommended to execute them all at once whenever possible.
 可能な限り一度にまとめて実行することを推奨します。
 """
 
+@mcp.prompt()
+def get_layout_data_strategy() -> str:
+    """Strategy for retrieving the current layout data from the scene
+    Use the get_layout_data tool to obtain the current layout data from the Blender scene.
+    To reduce communication data size, adjust the parameters as needed.
+    - num_decimal_places: Specify the number of decimal places for rounding location, rotation, and scale values. This helps reduce data size. The default is 3.
+    If decimal places are unnecessary for the overall scale or rough positions are sufficient, set it to 0 as needed.
+    - target: Specify the properties to include in the response. Options are as follows:
+        - "n": Name
+        - "l": Location
+        - "r": Rotation
+        - "s": Scale
+        - "p": Parameters
+        - "d": Description
+        - "t": Tags
+    By default, all properties are included, but reduce them as needed to decrease data size.
+    For example, if you only need to confirm existence, specifying "n" or "nl" is sufficient.
+    "d" and "t" are usually unnecessary. Add them only when needed, such as for editing or deleting objects with specific characteristics.
+    """
+    return """Strategy for retrieving the current layout data from the scene
+Use the get_layout_data tool to obtain the current layout data from the Blender scene.
+To reduce communication data size, adjust the parameters as needed.
+- num_decimal_places: Specify the number of decimal places for rounding location, rotation, and scale values. This helps reduce data size. The default is 3.
+If decimal places are unnecessary for the overall scale or rough positions are sufficient, set it to 0 as needed.
+- target: Specify the properties to include in the response. Options are as follows:
+    - "n": Name
+    - "l": Location
+    - "r": Rotation
+    - "s": Scale
+    - "p": Parameters
+    - "d": Description
+    - "t": Tags
+By default, all properties are included, but reduce them as needed to decrease data size.
+For example, if you only need to confirm existence, specifying "n" or "nl" is sufficient.
+"d" and "t" are usually unnecessary. Add them only when needed, such as for editing or deleting objects with specific characteristics.
+"""
+
+"""シーンの状態を得るための戦略
+get_layout_dataツールを使用して、Blenderシーンから現在のレイアウトデータを取得します。
+この際通信データ量を抑えるために、必要に応じてパラメータを調整します。
+- num_decimal_places: 位置、回転、スケールの値を丸める小数点以下の桁数を指定します。データサイズを減らすのに役立ちます。デフォルトは3です。
+全体のスケール的に小数点以下が必要ない場合や、ざっくり位置を知れればいい際に0にするなどで対応してください。
+- target: レスポンスに含めるプロパティを指定します。オプションは以下の通りです。
+    - "n": 名前
+    - "l": 位置
+    - "r": 回転
+    - "s": スケール
+    - "p": パラメータ
+    - "d": 説明
+    - "t": タグ
+デフォルトでは全部含まれますが、必要に応じて減らしてください。データ量が減ります。
+例えば存在確認だけであれば"n"指定もしくは"nl"だけで良いです。
+dやtも通常必要ないです。特定の特徴のあるオブジェクトを編集・削除する場合などに必要に応じて追加してください。
+"""
 
 def main():
     """Run the MCP server"""

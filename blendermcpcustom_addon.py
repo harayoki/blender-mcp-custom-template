@@ -68,7 +68,10 @@ def draw_layout_idprops_section(layout: bpy.types.UILayout, id_obj: Optional[bpy
 
     for k in keys:
         # IDプロパティはブラケット記法で描画
-        col.label(text=k[len(LAYOUT_PROP_PREFIX):])  # ラベルをプロパティ名に
+        label_text = k[len(LAYOUT_PROP_PREFIX):]
+        if label_text == "tags":
+            label_text += " (comma-separated)"
+        col.label(text=label_text)  # ラベルをプロパティ名に
         col.prop(id_obj, f'["{k}"]', text="")  # ラベルを消して全幅入力に
 
 
@@ -389,14 +392,25 @@ class BlenderMCPCustomServer:
             objects.append(item)
         return {"assets": objects}
 
-    def get_layout_data(self, num_decimal_places:int = 3) -> Dict[str, List[Dict[str, Any]]]:
+    def get_layout_data(self, num_decimal_places:int = 3, target: str="nl") -> Dict[str, List[Dict[str, Any]]]:
         """
         シーン内の特定のコレクション内のオブジェクトの配置情報を取得する
         レイアウトデータの内容はlocate_objects_batchedに準ずる
 
         num_decimal_places: 位置、回転、スケールの小数点以下の桁数 通信量削減のため指定する
+        target: 取得する情報の種類の組み合わせを指定する
+            n: name
+            l: location
+            r: rotation (in degrees)
+            s: scale
+            d: desc (layout_descカスタムプロパティ)
+            t: tags (layout_tagsカスタムプロパティ)
+            p: params (layout_で始まるカスタムプロパティ)
+            例: "nlrspdt" (全て) "nlr" (name, location, rotation) "n" (nameのみ) など
         戻り値:　辞書
         """
+        print("get_layout_data", json.dumps({"num_decimal_places": num_decimal_places, "target": target}))
+        target = target.lower()
         layout_data = []
         dest_collection_name = bpy.context.scene.bmcpc_dst_collection
         dest_collection = bpy.data.collections.get(dest_collection_name)
@@ -410,6 +424,8 @@ class BlenderMCPCustomServer:
                       math.degrees(obj.rotation_euler.y),
                       math.degrees(obj.rotation_euler.z)],  # rotation in degrees
                 "s": [obj.scale.x, obj.scale.y, obj.scale.z],  # scale
+                "d": "",  # desc
+                "t": [],  # tags
                 "p": {}  # params
             }
             for k, v in enumerate(item["l"]):
@@ -431,16 +447,27 @@ class BlenderMCPCustomServer:
             for k, v in obj.items():
                 if k.startswith(LAYOUT_PROP_PREFIX):
                     param_key = k[len(LAYOUT_PROP_PREFIX):]
-                    item["p"][param_key] = v
-            # 通信料を減らすためdescとtagsは削除
-            if "desc" in item["p"]:
-                del item["p"]["desc"]
-            if "tags" in item["p"]:
-                del item["p"]["tags"]
-            # paramsが空なら削除
-            if len(item["p"].keys()) == 0:
-                del item["p"]
+                    # print(f"Found layout prop: {param_key} = {v}")
+                    if param_key == "desc":
+                        item["d"] = v
+                    elif param_key == "tags":
+                        item["t"] = v.split(",") if isinstance(v, str) else []
+                    else:
+                        item["p"][param_key] = v
+            if "d" in item and "d" not in target:
+                del item["desc"]
+            if "t" in item and "t" not in target:
+                del item["tags"]
+
+            # targetに含まれないキーは削除
+            for key in list(item.keys()):
+                if key not in target:
+                    print(f"Removing key {key} from item, target={target}")
+                    del item[key]
+            print(f"#2 Object {obj.name} layout data: {item}")
+
             layout_data.append(item)
+        print(json.dumps(layout_data, indent=2, ensure_ascii=False))
         return {"layout_data": layout_data}
 
     def locate_objects_batched(self, layout_data: List[Dict[str, Any]]):
@@ -462,6 +489,7 @@ class BlenderMCPCustomServer:
         - num_located: 配置に成功したオブジェクトの数
         - num_errors: エラーが発生したオブジェクトの数
         """
+        print(json.dumps(layout_data, indent=2, ensure_ascii=False))
         num_error = 0
         num_located = 0
         num_edited = 0
@@ -505,22 +533,17 @@ class BlenderMCPCustomServer:
                     continue
                 new_name = layout.get("nn", src_name)
                 if obj.type == 'MESH':
-                    new_obj = duplicate_object_shared_mesh(obj, dst_collection)
+                    new_obj = duplicate_object_shared_mesh(obj, new_name, dst_collection)
                 elif obj.instance_type == 'COLLECTION' and obj.instance_collection:
-                    new_obj = bpy.data.objects.new(new_name, None)
-                    new_obj.instance_type = 'COLLECTION'
-                    new_obj.instance_collection = obj.instance_collection
-                    dst_collection.objects.link(new_obj)
+                    new_obj = duplicate_instance_object(obj, new_name, dst_collection)
                 else:
                     num_error += 1
                     continue
-                new_obj.name = new_name
             elif mode == "edit":
                 new_obj = bpy.data.objects.get(layout.get("n", ""))
             if not new_obj:
                 num_error += 1
                 continue
-            new_obj.rotation_mode = 'XYZ'
             if location is not None:
                 new_obj.location = location
             if rotation is not None:
@@ -545,8 +568,8 @@ class BlenderMCPCustomServer:
         }
 
 
-def duplicate_object_shared_mesh(obj: bpy.types.Object,
-                                 link_collection: bpy.types.Collection | None = None
+def duplicate_object_shared_mesh(
+        obj: bpy.types.Object, name:str, link_collection: bpy.types.Collection | None = None
 ) -> bpy.types.Object:
     """
     - メッシュは共有（data.copy()しない）
@@ -559,9 +582,32 @@ def duplicate_object_shared_mesh(obj: bpy.types.Object,
 
     # メッシュを共有 → data.copy() しないので obj.data を参照し続ける
     new_obj.data = obj.data
+    new_obj.name = name
+    new_obj.rotation_mode = 'XYZ'
 
     # コレクションにリンク
     (link_collection or bpy.context.collection).objects.link(new_obj)
+
+    return new_obj
+
+
+def duplicate_instance_object(
+        obj: bpy.types.Object, name:str, link_collection: bpy.types.Collection | None = None,
+        copy_custom_props: bool = True
+) -> bpy.types.Object:
+    """
+    インスタンスオブジェクトを複製
+    カスタムプロパティもコピーする
+    """
+    new_obj = bpy.data.objects.new(name, None)
+    new_obj.instance_type = 'COLLECTION'
+    new_obj.instance_collection = obj.instance_collection
+    (link_collection or bpy.context.collection).objects.link(new_obj)
+
+    if copy_custom_props:
+        custom_props = iter_layout_idprop_keys(obj)
+        for k in custom_props:
+            new_obj[k] = obj[k]
 
     return new_obj
 
