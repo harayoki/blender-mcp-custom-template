@@ -409,6 +409,56 @@ def locate_objects_batched(ctx: Context, layout_data: List[Dict[str, Any]]) -> D
         logger.error(f"Error locating objects: {str(e)}")
         raise Exception(f"Could not locate objects: {str(e)}")
 
+
+@mcp.tool()
+def get_locate_points_candidates(
+        ctx: Context, obj_name: str, with_normals: bool,
+        num_decimal_places: int = 3, density: float = -1, seed: int = -1) -> Dict[str, List[float]]:
+    """
+    Get candidate points on the specified mesh object for locating assets.
+    Parameters:
+        ctx: Context
+        obj_name: Name of the mesh object to get points from.
+        with_normals: Whether to include normals with the points.
+        num_decimal_places: Number of decimal places to round point coordinates (default: 3) used for smaller data size.
+        density: (optional) Density of points per square meter. If -1 keep current setting in Blender addon.
+            Usually 0-0.5 is good enough. Higher values give more points but take longer time.
+        seed: (optional) Random seed for point generation. If -1, keep current setting in Blender addon.
+        returns {
+            "p": [ x1,y1,z1, x2,y2,z2,... ]  # list of candidate points
+            "n": [nx1,ny1,nz1, nx2,ny2,nz2 ... ]  # list of normals, only if with_normals is True else empty list
+            "err": "error message"  # only if error occurs
+        }
+    """
+    try:
+        blender = get_blender_connection()
+        result = blender.send_command(
+            "get_locate_points_candidates",
+            {
+                "obj_name": obj_name,
+                "with_normals": with_normals,
+                "num_decimal_places": num_decimal_places,
+                "density": density,
+                "seed": seed
+         })
+        logger.info(f"Got {len(result.get('p', []))//3} candidate points from object '{obj_name}'")
+        return {
+            "p": result.get("p", []),
+            "n": result.get("n", []),
+            "err": result.get("err", "")
+        }
+    except Exception as e:
+        logger.error(f"Error getting locate points candidates: {str(e)}")
+        raise Exception(f"Could not get locate points candidates: {str(e)}")
+
+@mcp.tool()
+def debug_print(ctx: Context, args: List[str]) -> Dict[str, Any]:
+    """A simple tool to print debug messages to the server log."""
+    blender = get_blender_connection()
+    result = blender.send_command("debug_print", {"args": args})
+    return {"result": result}
+
+
 @mcp.prompt()
 def layout_strategy() -> str:
     """Strategy for Planning a Scene Layout in Blender Based on User Requirements
@@ -432,6 +482,17 @@ Objects include collision information; by default, avoid overlaps, unless the us
 Unless otherwise specified, placement patterns should avoid a grid-like arrangement and instead appear natural rather than mechanical.
 Where appropriate and feasible, adjust size and rotation to achieve a more natural look.”
 Ground contact is not considered for now; assume Z=0 is the ground level.
+
+When placing an object on top of another object, use the candidate points obtained with the `get_locate_points_candidates`.
+If you want the object to follow the surface direction of the target object, also obtain the normal information with the `get_locate_points_candidates`.
+**Always use coordinates from `get_locate_points_candidates` as the basis for placement. You may interpolate between candidate points when appropriate, but do not manually estimate coordinates without reference to the candidate point data.**
+Obtaining a large number of candidate points (positions and normals) increases communication load, so it is generally
+acceptable to interpolate and determine new points between the candidate points.
+
+Obtaining a large number of candidate points (positions and normals) increases communication load, so it is generally
+acceptable to interpolate and determine new points between the candidate points.
+If the user does not want interpolation, decide which candidate point to use without interpolation.
+Adjust the name of the placed object to be unique in the scene, based on the name of the source object.
 If the user does not specify what the objects should be placed on or their height (Z position),
 place objects that would naturally be on the ground at height 0, and position others at an appropriate height.
 Object names should be based on the source asset’s name, adjusted to be unique in the scene.
@@ -466,6 +527,17 @@ Where appropriate and feasible, adjust size and rotation to achieve a more natur
 Ground contact is not considered for now; assume Z=0 is the ground level.
 If the user does not specify what the objects should be placed on or their height (Z position), 
 place objects that would naturally be on the ground at height 0, and position others at an appropriate height.
+
+When placing an object on top of another object, use the candidate points obtained with the `get_locate_points_candidates`.
+If you want the object to follow the surface direction of the target object, also obtain the normal information with the `get_locate_points_candidates`.
+**Always use coordinates from `get_locate_points_candidates` as the basis for placement. You may interpolate between candidate points when appropriate, but do not manually estimate coordinates without reference to the candidate point data.**
+Obtaining a large number of candidate points (positions and normals) increases communication load, so it is generally
+acceptable to interpolate and determine new points between the candidate points.
+
+Obtaining a large number of candidate points (positions and normals) increases communication load, so it is generally 
+acceptable to interpolate and determine new points between the candidate points. 
+If the user does not want interpolation, decide which candidate point to use without interpolation.
+Adjust the name of the placed object to be unique in the scene, based on the name of the source object.
 Object names should be based on the source asset’s name, adjusted to be unique in the scene.
 Specify placement, rotation, scale, and any adjustable parameters for each object.
 
@@ -501,7 +573,16 @@ Blenderの座標系は右手系で、Z軸が上方向、Y軸が奥方向、X軸�
 配置パターンは言及されない限りグリッド状の配置にならないよう機械的ではなく自然な感じにします。
 対象の設定的に自然で可能な範囲で大きさや回転も調整します。
 地面との接触は現状考えなくてよいです。Zが0の部分が接地面と考えます。
-何の上に配置するか、高さ（Z位置)はどうするかなどの言及がユーザーからない場合、地面にいそうなものは高さ０にそうでないものは適切な高さに配置してください。
+何の上に配置するか、高さ（Z位置)はどうするかなどの言及がユーザーからない場合、地面にいそうなものは高さ0に、そうでないものは適切な高さに配置してください。
+
+他のオブジェクトの上にオブジェクトを配置する場合は、`get_locate_points_candidates`で取得した候補点を使用してください。
+オブジェクトを対象オブジェクトの表面方向に従わせたい場合は、`get_locate_points_candidates`で法線情報も取得してください。
+**常に `get_locate_points_candidates` から得られる座標を配置の基準として使用してください。
+適切な場合は候補点間で補間しても構いませんが、候補点データを参照せずに手動で座標を推測してはいけません。
+** 大量の候補点（位置と法線）を取得すると通信負荷が増加するため、一般的には候補点間で補間して新しい点を決定することが許容されます。
+
+候補点（位置および法線）を多量に得ると通信量が増えるので、通常は候補点と候補点の合間で新たな点を決定し補間しても良いです。
+ユーザが望まない場合は補間せず候補点のなかからどれを使うか決定してください。
 配置するオブジェクトの名前はコピー元オブジェクト名をベースに、シーンにユニークであるよう調整します。
 配置場所、回転、スケール、および調整可能なパラメータを指定します。
 
@@ -561,7 +642,8 @@ def edit_strategy() -> str:
 1. Check the current state of the scene.
 Use `get_layout_data` to obtain the current object layout.
 Follow the method described in get_layout_data_strategy.
-If you are certain about the objects to edit, such as those recently placed or edited, you may skip this step to save communication processing. Adjust based on user feedback.
+If you are certain about the objects to edit, such as those recently placed or edited,
+you may skip this step to save communication processing. Adjust based on user feedback.
 2. Identify the objects to edit.
 Analyze the user's requirements and determine the names of the objects to edit.
 3. Edit the objects.
@@ -575,7 +657,8 @@ Convey the results of the editing operation to the user in clear and understanda
 1. Check the current state of the scene.
 Use `get_layout_data` to obtain the current object layout.
 Follow the method described in get_layout_data_strategy.
-If you are certain about the objects to edit, such as those recently placed or edited, you may skip this step to save communication processing. Adjust based on user feedback.
+If you are certain about the objects to edit, such as those recently placed or edited, y
+ou may skip this step to save communication processing. Adjust based on user feedback.
 2. Identify the objects to edit.
 Analyze the user's requirements and determine the names of the objects to edit.
 3. Edit the objects.
@@ -674,6 +757,29 @@ get_layout_dataツールを使用して、Blenderシーンから現在のレイ�
 デフォルトでは全部含まれますが、必要に応じて減らしてください。データ量が減ります。
 例えば存在確認だけであれば"n"指定もしくは"nl"だけで良いです。
 dやtも通常必要ないです。特定の特徴のあるオブジェクトを編集・削除する場合などに必要に応じて追加してください。
+"""
+
+
+@mcp.prompt()
+def get_locate_points_candidates_strategy() -> str:
+    """Strategy for obtaining candidate points on a mesh object for asset placement
+You can get the position and normal direction of each point. Since the data can be very large, adjust by lowering the density or the num_decimal_places.
+Density refers to the number of points per square meter. Usually, a value between 0.1 and 0.5 is sufficient. Increasing it will result in larger data sizes.
+Even if there are few candidate points, placement can still be done through interpolation, so avoid setting it too high.
+If the normal direction is not used for placement, do not retrieve it. For example, buildings usually do not require normals as they are typically placed upright.
+"""
+    return """Strategy for obtaining candidate points on a mesh object for asset placement
+You can get the position and normal direction of each point. Since the data can be very large, adjust by lowering the density or the num_decimal_places.
+Density refers to the number of points per square meter. Usually, a value between 0.1 and 0.5 is sufficient. Increasing it will result in larger data sizes.
+Even if there are few candidate points, placement can still be done through interpolation, so avoid setting it too high.
+If the normal direction is not used for placement, do not retrieve it. For example, buildings usually do not require normals as they are typically placed upright.
+"""
+
+"""オブジェクトの設置場所の候補となるメッシュ上の点を得るための戦略
+各点の位置とノーマル方向を得られます。非常にデータが大きくなるので、densityやnum_decimal_placesを下げて調整してください。
+densityは1平方メートルあたりの点の密度です。通常0.1-0.5くらいで十分です。高くするとデータ量が増えます。
+候補点が少なくても補完をして設置もできるので、あまり高くしないでください。
+ノーマル方向を設置時に活用しないならそもそも取得しないでください。建物などは通常まっすぐ立ってればいいのでノーマルを使いません。
 """
 
 def main():

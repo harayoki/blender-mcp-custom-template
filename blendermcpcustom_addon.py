@@ -6,11 +6,11 @@ import json
 import threading
 import socket
 import time
-import traceback
+import mathutils
 from bpy.props import StringProperty, IntProperty, BoolProperty, EnumProperty
 import io
 from contextlib import redirect_stdout, suppress
-from typing import List, Dict, Any, Optional, Literal
+from typing import List, Dict, Any, Optional, Literal, Union
 import traceback
 
 bl_info = {
@@ -26,8 +26,10 @@ bl_info = {
 PI_DIV_180 = math.pi / 180.0
 DEFAULT_LAYOUT_SRC_COLLECTION_NAME = "LayoutSrcObjects"
 DEFAULT_LAYOUT_DST_COLLECTION_NAME = "LayoutDstObjects"
+TEMP_WORK_COLLECTION_NAME = "_TempWorkCollection_"
 LAYOUT_PROP_PREFIX: str = "layout_"
 LayoutMode = Literal["new", "edit", "del"]
+
 
 def iter_layout_idprop_keys(id_obj: bpy.types.ID, prefix: str = LAYOUT_PROP_PREFIX) -> List[str]:
     """
@@ -75,6 +77,90 @@ def draw_layout_idprops_section(layout: bpy.types.UILayout, id_obj: Optional[bpy
         col.prop(id_obj, f'["{k}"]', text="")  # ラベルを消して全幅入力に
 
 
+def get_points_and_normals(
+        obj_name, num_decimal_places: int = 3, density: Union[int, None] = None, seed: Union[int, None] = None
+    ) -> (List[Union[int, float]], List[Union[int, float]], str):
+    """
+    Geometry NodesのScatterノードで生成されたポイントクラウドの位置と法線を取得する
+    TODO 動的なジオメトリノード作成 現在はシーンにある前提
+    """
+    print(f"get_points_and_normals: obj_name={obj_name}, num_decimal_places={num_decimal_places}, density={density}, seed={seed}")
+    def _id_by_name(ng, name):
+        for item in ng.interface.items_tree:
+            if getattr(item, "name", None) == name:
+                return item.identifier
+        raise KeyError(name)
+
+    work_obj = bpy.data.objects["work_pc"]
+    print(f"work_obj: {work_obj}")
+    if not work_obj:
+        return [], [], f"Object not found: work_pc"
+    target_obj = bpy.data.objects.get(obj_name)
+    print(f"target_obj: {target_obj}")
+    if not target_obj:
+        return [], [], f"Object not found: {obj_name}"
+
+    # work_objの位置と回転と拡大をtarget_objに合わせる
+    work_obj.location = target_obj.location
+
+    mod_name = "scatter"
+    mod = work_obj.modifiers[mod_name]
+    if not mod or mod.type != 'NODES':
+        return [], [], f"Modifier not found or not Geometry Nodes: {mod_name}"
+    ng = mod.node_group
+    in_object = _id_by_name(ng, "Object")
+    in_density = _id_by_name(ng, "Density")
+    in_seed = _id_by_name(ng, "Seed")
+    if not in_object or not in_density or not in_seed:
+        return [], [], "Input not found in Geometry Nodes: Object, Density, Seed"
+
+    if mod[in_object] != target_obj:
+        mod[in_object] = target_obj
+    if density is not None and mod[in_density] != density:
+        mod[in_density] = density
+    if seed is not None and mod[in_seed] != seed:
+        mod[in_seed] = seed
+
+    error_message = ""
+    pos_flattened = []
+    nor_flattened = []
+    try:
+        dg = bpy.context.evaluated_depsgraph_get()
+        ev = work_obj.evaluated_get(dg)
+        if ev.type != 'POINTCLOUD':
+            error_message = "Evaluated object is not a point cloud"
+        pc = ev.data
+        normal_attr = "N"
+        pos = [e.vector[:] for e in pc.attributes["position"].data]
+        nor = [e.vector[:] for e in pc.attributes[normal_attr].data]
+        # work_objの位置と回転を考慮してワールド座標に変換
+        pos = [ev.matrix_world @ mathutils.Vector(p) for p in pos]
+        nor = [ev.matrix_world.to_3x3() @ mathutils.Vector(n) for n in nor]
+
+        # まず平坦化してから小数点以下を丸める
+        for p in pos:
+            pos_flattened += list(p)
+        for n in nor:
+            nor_flattened += list(n)
+        # num_decimal_placesで丸める
+        pos_flattened = [round(v, num_decimal_places) for v in pos_flattened]
+        nor_flattened = [round(v, num_decimal_places) for v in nor_flattened]
+        # 整数として表現できるなら整数にする
+        if num_decimal_places >= 0:
+            pos_flattened = [int(v) if v == int(v) else v for v in pos_flattened]
+            nor_flattened = [int(v) if v == int(v) else v for v in nor_flattened]
+    except Exception as e:
+        error_message = f"Error evaluating point cloud: {str(e)}"
+    finally:
+        # 解放しないとフリーズを招く！
+        eval_obj = None
+        dg = None
+        pc = None
+    if error_message:
+        return [], [], error_message
+    return pos_flattened, nor_flattened, ""
+
+
 class BlenderMCPCustomServer:
     def __init__(self, host='localhost', port=9877):
         self.host = host
@@ -97,6 +183,7 @@ class BlenderMCPCustomServer:
             self.socket.bind((self.host, self.port))
             self.socket.listen(1)
 
+            # Start server thread
             # Start server thread
             self.server_thread = threading.Thread(target=self._server_loop)
             self.server_thread.daemon = True
@@ -245,6 +332,8 @@ class BlenderMCPCustomServer:
             "list_layout_assets": self.list_layout_assets,
             "get_layout_data": self.get_layout_data,
             "locate_objects_batched": self.locate_objects_batched,
+            "get_locate_points_candidates": self.get_locate_points_candidates,
+            "debug_print": self.debug_print,
         }
 
         handler = handlers.get(cmd_type)
@@ -576,6 +665,31 @@ class BlenderMCPCustomServer:
         print(json.dumps(result_obj, indent=2, ensure_ascii=False))
         return {"results": result_obj}
 
+    def get_locate_points_candidates(
+            self, obj_name: str, with_normals: bool, num_decimal_places: int = 3, density: float = -1, seed: int = -1):
+        """
+        Geometry NodesのScatterノードで生成されたポイントクラウドの位置と法線を取得する
+        densityは1以下が望ましい
+        """
+        try:
+            pos, nor, error_message = get_points_and_normals(
+                obj_name, num_decimal_places=num_decimal_places,
+                density=density if density > 0 else None, seed=seed if seed >= 0 else None)
+            if not with_normals:
+                nor = []
+            return {
+                "p": pos,
+                "n": nor,
+                "err": error_message
+            }
+        except Exception as e:
+            print(f"Error in get_locate_points_candidates: {str(e)}")
+            traceback.print_exc()
+
+    def debug_print(self, args: List[str]):
+        print("debug_print:", args)
+        return {"result": True}
+
 
 def duplicate_object_shared_mesh(
         obj: bpy.types.Object, name:str, link_collection: bpy.types.Collection | None = None
@@ -677,6 +791,7 @@ class BLENDERMCPCUSTOM_OT_StartServer(bpy.types.Operator):
 
         return {'FINISHED'}
 
+
 # Operator to stop the server
 class BLENDERMCPCUSTOM_OT_StopServer(bpy.types.Operator):
     bl_idname = "blendermcpcustom.stop_server"
@@ -694,6 +809,7 @@ class BLENDERMCPCUSTOM_OT_StopServer(bpy.types.Operator):
         scene.bmcpc_server_running = False
 
         return {'FINISHED'}
+
 
 class BLENDERMCPCUSTOM_OT_AddLayoutCustomProps(bpy.types.Operator):
     bl_idname = "blendermcpcustom.add_layout_custom_props"
@@ -720,6 +836,9 @@ def create_default_collections():
     # デフォルトのコレクションが存在しない場合は作成
     if bpy.context.scene.bmcpc_dst_collection == DEFAULT_LAYOUT_DST_COLLECTION_NAME:
         ensure_collection_in_scene(bpy.context.scene, DEFAULT_LAYOUT_DST_COLLECTION_NAME)
+
+    # 一時作業用コレクションを作成
+    ensure_collection_in_scene(bpy.context.scene, TEMP_WORK_COLLECTION_NAME)
 
 
 def ensure_collection_in_scene(scene: bpy.types.Scene, name: str) -> bpy.types.Collection:
