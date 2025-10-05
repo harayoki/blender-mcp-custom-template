@@ -187,7 +187,7 @@ class BlenderMCPCustomServer:
         # Base handlers that are always available
         handlers = {
             "get_viewport_screenshot": self.get_viewport_screenshot,
-            "execute_code": self.execute_code,
+            # "execute_code": self.execute_code,
             "ping": self.ping,
         }
 
@@ -262,22 +262,22 @@ class BlenderMCPCustomServer:
         except Exception as e:
             return {"error": str(e)}
 
-    def execute_code(self, code):
-        """Execute arbitrary Blender Python code"""
-        # This is powerful but potentially dangerous - use with caution
-        try:
-            # Create a local namespace for execution
-            namespace = {"bpy": bpy}
-
-            # Capture stdout during execution, and return it as result
-            capture_buffer = io.StringIO()
-            with redirect_stdout(capture_buffer):
-                exec(code, namespace)
-
-            captured_output = capture_buffer.getvalue()
-            return {"executed": True, "result": captured_output}
-        except Exception as e:
-            raise Exception(f"Code execution error: {str(e)}")
+    # def execute_code(self, code):
+    #     """Execute arbitrary Blender Python code"""
+    #     # This is powerful but potentially dangerous - use with caution
+    #     try:
+    #         # Create a local namespace for execution
+    #         namespace = {"bpy": bpy}
+    #
+    #         # Capture stdout during execution, and return it as result
+    #         capture_buffer = io.StringIO()
+    #         with redirect_stdout(capture_buffer):
+    #             exec(code, namespace)
+    #
+    #         captured_output = capture_buffer.getvalue()
+    #         return {"executed": True, "result": captured_output}
+    #     except Exception as e:
+    #         raise Exception(f"Code execution error: {str(e)}")
 
     def ping(self):
         """
