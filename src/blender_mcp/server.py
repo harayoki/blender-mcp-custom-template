@@ -413,7 +413,7 @@ def locate_objects_batched(ctx: Context, layout_data: List[Dict[str, Any]]) -> D
 @mcp.tool()
 def get_locate_points_candidates(
         ctx: Context, obj_name: str, with_normals: bool,
-        num_decimal_places: int = 3, density: float = -1, seed: int = -1) -> Dict[str, List[float]]:
+        num_decimal_places: int = 3, density: float = 1.0, seed: int = -1) -> Dict[str, List[float]]:
     """
     Get candidate points on the specified mesh object for locating assets.
     Parameters:
@@ -488,6 +488,7 @@ If you want the object to follow the surface direction of the target object, als
 **Always use coordinates from `get_locate_points_candidates` as the basis for placement. You may interpolate between candidate points when appropriate, but do not manually estimate coordinates without reference to the candidate point data.**
 Obtaining a large number of candidate points (positions and normals) increases communication load, so it is generally
 acceptable to interpolate and determine new points between the candidate points.
+Blender's coordinate system is right-handed, with the Z-axis pointing upward, the Y-axis pointing backward, and the X-axis pointing to the right. The Z-direction of the placed object aligns with the normal direction. The Y-negative direction of the placed object faces forward.
 
 Obtaining a large number of candidate points (positions and normals) increases communication load, so it is generally
 acceptable to interpolate and determine new points between the candidate points.
@@ -533,6 +534,7 @@ If you want the object to follow the surface direction of the target object, als
 **Always use coordinates from `get_locate_points_candidates` as the basis for placement. You may interpolate between candidate points when appropriate, but do not manually estimate coordinates without reference to the candidate point data.**
 Obtaining a large number of candidate points (positions and normals) increases communication load, so it is generally
 acceptable to interpolate and determine new points between the candidate points.
+Blender's coordinate system is right-handed, with the Z-axis pointing upward, the Y-axis pointing backward, and the X-axis pointing to the right. The Z-direction of the placed object aligns with the normal direction. The Y-negative direction of the placed object faces forward.
 
 Obtaining a large number of candidate points (positions and normals) increases communication load, so it is generally 
 acceptable to interpolate and determine new points between the candidate points. 
@@ -580,6 +582,8 @@ Blenderの座標系は右手系で、Z軸が上方向、Y軸が奥方向、X軸�
 **常に `get_locate_points_candidates` から得られる座標を配置の基準として使用してください。
 適切な場合は候補点間で補間しても構いませんが、候補点データを参照せずに手動で座標を推測してはいけません。
 ** 大量の候補点（位置と法線）を取得すると通信負荷が増加するため、一般的には候補点間で補間して新しい点を決定することが許容されます。
+Blenderの座標系は右手系で、Z軸が上方向、Y軸が奥方向、X軸が右方向です。配置物のZ方向を法線方向と一致させます。
+配置物はY-方向が前方を向いています。
 
 候補点（位置および法線）を多量に得ると通信量が増えるので、通常は候補点と候補点の合間で新たな点を決定し補間しても良いです。
 ユーザが望まない場合は補間せず候補点のなかからどれを使うか決定してください。
@@ -777,7 +781,7 @@ If the normal direction is not used for placement, do not retrieve it. For examp
 
 """オブジェクトの設置場所の候補となるメッシュ上の点を得るための戦略
 各点の位置とノーマル方向を得られます。非常にデータが大きくなるので、densityやnum_decimal_placesを下げて調整してください。
-densityは1平方メートルあたりの点の密度です。通常0.1-0.5くらいで十分です。高くするとデータ量が増えます。
+densityは1平方メートルあたりの点の密度です。通常1.0くらいで十分です。高くするとデータ量が増えます。
 候補点が少なくても補完をして設置もできるので、あまり高くしないでください。
 ノーマル方向を設置時に活用しないならそもそも取得しないでください。建物などは通常まっすぐ立ってればいいのでノーマルを使いません。
 """
