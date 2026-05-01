@@ -278,6 +278,28 @@ def get_viewport_screenshot(ctx: Context, max_size: int = 800) -> Image:
         logger.error(f"Error capturing screenshot: {str(e)}")
         raise Exception(f"Screenshot failed: {str(e)}")
 
+@mcp.tool()
+def camera_control(ctx: Context, action: str, parameters: Dict[str, Any] = None) -> str:
+    """
+    Control the active camera in Blender.
+
+    Parameters:
+    - action: The camera action to perform (e.g., "move", "rotate", "set_fov")
+    - parameters: A dictionary of parameters for the action
+
+    Returns a status message.
+    """
+    try:
+        blender = get_blender_connection()
+        result = blender.send_command("camera_control", {
+            "action": action,
+            "parameters": parameters or {}
+        })
+        return f"Camera action '{action}' executed successfully."
+    except Exception as e:
+        logger.error(f"Error controlling camera: {str(e)}")
+        return f"Error controlling camera: {str(e)}"
+
 # @mcp.tool()
 # def execute_blender_code(ctx: Context, code: str) -> str:
 #     """
