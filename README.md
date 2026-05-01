@@ -1,6 +1,6 @@
 # BlenderMCPCustom sample
 
-以下のリポジトリをクローンしてシンプルな状態に改変したものです。
+以下のリポジトリをクローンして改変したものです。
 This is a simplified version modified from the following cloned repository.
 
 https://github.com/ahujasid/blender-mcp
